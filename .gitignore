@@ -1,0 +1,14 @@
+# Environments
+venv/
+env/
+.env
+
+# Data
+data/
+*.csv
+*.xlsx
+
+# Python cache
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
