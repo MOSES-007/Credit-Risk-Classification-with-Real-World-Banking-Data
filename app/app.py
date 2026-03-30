@@ -4,31 +4,26 @@ import numpy as np
 import joblib
 import os
 
-# --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="Credit Risk Evaluator", page_icon="🏦", layout="centered")
 
-# --- 2. LOAD ML ASSETS ---
-# @st.cache_resource ensures we only load these large files once when the app starts
 @st.cache_resource
 def load_ml_components():
-    # Assuming app.py is inside the 'app' folder alongside the joblib files
     base_path = os.path.dirname(__file__)
     imputer = joblib.load(os.path.join(base_path, 'imputer.joblib'))
     scaler = joblib.load(os.path.join(base_path, 'scaler.joblib'))
     model = joblib.load(os.path.join(base_path, 'xgb_model.joblib'))
     expected_cols = joblib.load(os.path.join(base_path, 'expected_columns.joblib'))
-    return imputer, scaler, model, expected_cols
+    # NEW: Load the baseline "Average Joe" profile
+    baseline = joblib.load(os.path.join(base_path, 'baseline_profile.joblib'))
+    return imputer, scaler, model, expected_cols, baseline
 
-imputer, scaler, model, expected_cols = load_ml_components()
+imputer, scaler, model, expected_cols, baseline_profile = load_ml_components()
 
-# --- 3. APP HEADER ---
 st.title("🏦 Corporate Credit Risk Evaluator")
 st.markdown("Enter the applicant's financial details below to generate a live Probability of Default (PoD) using our XGBoost model.")
 st.divider()
 
-# --- 4. USER INPUT FORM ---
 st.subheader("Applicant Information")
-
 col1, col2 = st.columns(2)
 
 with col1:
@@ -43,21 +38,25 @@ with col2:
 
 st.divider()
 
-# --- 5. PREDICTION LOGIC ---
 if st.button("Evaluate Credit Risk", type="primary", use_container_width=True):
     with st.spinner("Analyzing profile..."):
         
-        # A. Create a completely empty dataframe with the 158 columns our model expects
-        input_data = pd.DataFrame(0, index=[0], columns=expected_cols)
+        # A. Start with the "Average Joe" baseline instead of zeros!
+        input_data = pd.DataFrame([baseline_profile])
         
-        # B. Slot the numerical inputs into their correct columns
+        # B. Overwrite the baseline with the user's specific inputs
         input_data['loan_amnt'] = loan_amnt
         input_data['annual_inc'] = annual_inc
         input_data['int_rate'] = int_rate
         input_data['dti'] = dti
         
-        # C. Handle the Categorical inputs (One-Hot Encoding alignment)
-        # We construct the column name exactly as get_dummies did (e.g., 'home_ownership_RENT')
+        # C. Handle Categorical inputs carefully
+        # First, wipe the baseline clean for these specific categories
+        for col in expected_cols:
+            if col.startswith("home_ownership_") or col.startswith("emp_length_"):
+                input_data[col] = 0
+                
+        # Then apply the user's explicit choices
         home_col = f"home_ownership_{home_ownership}"
         if home_col in expected_cols:
             input_data[home_col] = 1
@@ -66,17 +65,13 @@ if st.button("Evaluate Credit Risk", type="primary", use_container_width=True):
         if emp_col in expected_cols:
             input_data[emp_col] = 1
 
-        # D. Push the data through the pipeline (Impute -> Scale -> Predict)
+        # D. Predict
         imputed_data = imputer.transform(input_data)
         scaled_data = scaler.transform(imputed_data)
-        
-        # We want the probability of Class 1 (Default)
         probability_of_default = model.predict_proba(scaled_data)[0][1]
         
-        # --- 6. DISPLAY RESULTS ---
+        # E. Display
         st.subheader("Evaluation Results")
-        
-        # Set our business threshold (e.g., 35% based on our earlier curve)
         THRESHOLD = 0.35 
         
         if probability_of_default > THRESHOLD:
